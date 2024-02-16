@@ -2,7 +2,7 @@ library(tidyverse)
 library(arrow)
 
 data <- 
-  read_delim("./data/data_final.csv", delim = ";", show_col_types = FALSE) |> 
+  read_delim("./raw_data/data_final.csv", delim = ";", show_col_types = FALSE) |> 
   mutate(int_no = as.character(int_no),
          across(c(all_pedest, median:parking, any_exclus, all_red_an), as_factor),
          date = dmy(date_),
@@ -32,4 +32,4 @@ data$ln_distdt[is.na(data$ln_distdt)] <- 0
 # final dataset
 data <- select(data, -c(street_1, street_2))
 
-write_parquet(data, "./data/data_final.parquet")
+write_parquet(data, "./processed_data/data_final.parquet")
