@@ -5,33 +5,44 @@
 library(tidyverse) # data manipulations
 library(arrow) # .parquet files
 library(tidymodels) # modelling framework
-library(poissonreg) # regularized poisson
-library(xgboost) # 
-library(doFuture)
+library(glmnet) # regularized regression
+library(poissonreg) # tidymodels wrapper for poisson glmnet
+library(ranger) # Random forest
+library(xgboost) # XGBoost
+library(doFuture) # parallel processing
+
 
 # Data split ----
 set.seed(123)
-intersections_df <- read_parquet("./data/data_final.parquet")
+intersections_df <- read_parquet("./processed_data/data_final.parquet")
 inter_split <- initial_split(intersections_df)
 inter_train <- training(inter_split)
 inter_test <- testing(inter_split)
-inter_folds <- vfold_cv(inter_train, v = 5, repeats = 5)
+inter_folds <- vfold_cv(inter_train, v = 10, repeats = 5) # 10-folds, 5-repeats
 
 # Data preprocessing (recipes) ----
 # need more preprocessing recipes for different models 
 # and preprocessing steps
 
-base_lm <- 
+base_rec <- 
   recipe(acc ~ ., data = inter_train) |> 
   # Create date features
   step_date(date, features = c("dow", "month")) |>
   # imputing missing dates with nearest observations
   step_impute_knn(starts_with("date_"), neighbors = 2, impute_with = imp_vars(x, y)) |> 
+  step_select(-date) |> 
   # Create roles to keep certain information for post prediction analysis
-  update_role(c(int_no, starts_with("rue"), borough, x, y, date), new_role = "ID") |>  
-  step_unknown(all_nominal_predictors(), new_level = "NA") |> 
-  step_dummy(all_factor_predictors(), one_hot = FALSE) |> 
-  step_nzv()
+  update_role(c(int_no, starts_with("rue"), borough, x, y), new_role = "ID") |>  
+  step_unknown(all_nominal_predictors(), new_level = "NA") 
+
+lm_rec <- 
+  base_rec |> 
+  step_dummy(all_factor_predictors(), one_hot = FALSE)
+
+boost_rec <- 
+  base_rec |> 
+  step_dummy(all_factor_predictors(), one_hot = TRUE)
+
 
 # Model specifications ----
 poisson <-
@@ -66,11 +77,17 @@ boosting <-
 
 # Workflow sets ----
 model_sets <- 
-  workflow_set(preproc = list(base_lm),
+  workflow_set(preproc = list(base_rec, ),
                models = list(poisson, random, boosting)
                )
 
+model_sets <- 
+  bind_rows(workflow_set(list(base = base_rec), list(random)),
+          workflow_set(list(lm = lm_rec), list(poisson)),
+          workflow_set(list(xg = boost_rec), list(boosting)))
+
 ## Parallel processing ----
+tictoc::tic()
 all_cores <- parallel::detectCores(logical = FALSE)
 registerDoFuture()
 cl <- parallel::makeCluster(all_cores)
@@ -81,12 +98,17 @@ models_result <-
     model_sets, 
     resamples = inter_folds, 
     fn = "tune_grid",
-    grid = 1, 
+    grid = 30, # regular grid
     seed = 123, 
-    verbose = TRUE
+    verbose = TRUE,
+    metrics = metric_set(rmse, mae)
     )
-
+tictoc::toc()
 # What's the best model?
+autoplot(models_result, select_best = TRUE)
+rank_results(models_result, rank_metric = "rmse", select_best = TRUE)
+
+# Looks like xgboost provides best model, followed closely by random forest
 
 # Tuning Grid ----
 
