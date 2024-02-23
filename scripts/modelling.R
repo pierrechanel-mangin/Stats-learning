@@ -13,13 +13,13 @@ library(doFuture) # parallel processing
 
 
 # Data split ----
-set.seed(123)
 landuse_df <- read_parquet("./processed_data/land_use.parquet")
 stops_df <- read_parquet("./processed_data/stm_stops.parquet") |> select(-stop_code_id)
 intersections_df <- 
   read_parquet("./processed_data/data_final.parquet") |> 
   left_join(landuse_df, by = "int_no") |> 
   left_join(stops_df, by = "int_no")
+set.seed(123)
 inter_split <- initial_split(intersections_df)
 inter_train <- training(inter_split)
 inter_test <- testing(inter_split)

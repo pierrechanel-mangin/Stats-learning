@@ -18,12 +18,23 @@ data_sf <-
     crs = 32188
   )
 
+# data type
+dict <- readxl::read_xlsx("./references/Dictionnaire_final.xlsx")
+variables <- 
+  map(unique(dict$TYPE), \(x) 
+      dict |> 
+        filter(TYPE == x) |>
+        pull(NOM)) |> 
+  set_names(unique(dict$TYPE))
+
+# factor count
 factor_count <- 
   select(data, where(is.factor)) |> 
   pivot_longer(everything()) |> 
   count(name, value) |> 
   print(n = 30)
 
+# multicollinearity comparison
 compare_graph <- function(var){
   select(data, acc, all_of(var)) |> 
     GGally::ggpairs()

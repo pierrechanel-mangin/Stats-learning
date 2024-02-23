@@ -4,7 +4,7 @@ library(arrow)
 data <- 
   read_delim("./raw_data/data_final.csv", delim = ";", show_col_types = FALSE) |> 
   mutate(int_no = as.character(int_no),
-         across(c(all_pedest, median:parking, any_exclus, all_red_an), as_factor),
+         across(c(all_pedest, median:parking, any_exclus, all_red_an, new_half_r), as_factor),
          date = dmy(date_),
          borough = case_when(
            borough == "C¶te-des-Neiges-Notre-Dame-de-Graces" ~ "Côte-des-Neiges-Notre-Dame-de-Graces",
@@ -16,7 +16,8 @@ data <-
            borough == "St-LÚonard"  ~ "St-Léonard",
            .default = borough
          )) |> 
-  select(-c(date_, `...60`,`...61`)) # column 60-61 are duplicates I think
+  select(-c(date_, `...60`,`...61`)) |> # column 60-61 are duplicates I think
+  rename(number_of = number_of_)
 
 # extra cleaning
 data$rue_2[data$rue_2=="P"] <- "Paul-Émile-Lamarche"
