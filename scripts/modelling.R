@@ -14,7 +14,12 @@ library(doFuture) # parallel processing
 
 # Data split ----
 set.seed(123)
-intersections_df <- read_parquet("./processed_data/data_final.parquet")
+landuse_df <- read_parquet("./processed_data/land_use.parquet")
+stops_df <- read_parquet("./processed_data/stm_stops.parquet") |> select(-stop_code_id)
+intersections_df <- 
+  read_parquet("./processed_data/data_final.parquet") |> 
+  left_join(landuse_df, by = "int_no") |> 
+  left_join(stops_df, by = "int_no")
 inter_split <- initial_split(intersections_df)
 inter_train <- training(inter_split)
 inter_test <- testing(inter_split)
@@ -29,15 +34,17 @@ base_rec <-
   # Create date features
   step_date(date, features = c("dow", "month")) |>
   # imputing missing dates with nearest observations
-  step_impute_knn(starts_with("date_"), neighbors = 2, impute_with = imp_vars(x, y)) |> 
+  step_impute_knn(c(starts_with("date_"), land_use), neighbors = 2, impute_with = imp_vars(x, y)) |> 
   step_select(-date) |> 
   # Create roles to keep certain information for post prediction analysis
   update_role(c(int_no, starts_with("rue"), borough, x, y), new_role = "ID") |>  
-  step_unknown(all_nominal_predictors(), new_level = "NA") 
+  step_unknown(all_nominal_predictors(), new_level = "NA")
 
 lm_rec <- 
-  base_rec |> 
-  step_dummy(all_factor_predictors(), one_hot = FALSE)
+  base_rec |>
+  step_dummy(all_factor_predictors(), one_hot = FALSE) |>
+  step_nzv(all_predictors()) |>
+  step_interact(terms = ~matches("ln_c"):c(median_X1:lt_prot_re_X1))
 
 boost_rec <- 
   base_rec |> 
@@ -45,13 +52,23 @@ boost_rec <-
 
 
 # Model specifications ----
-poisson <-
+pois <-
   poisson_reg(
     engine = "glmnet",
     mode = "regression",
     penalty = tune(),
     mixture = tune()
   )
+
+pois_rel <-
+  poisson_reg(
+    mode = "regression",
+    penalty = tune(),
+    mixture = tune()
+  ) |> 
+  set_engine(engine = "glmnet",
+             relax = TRUE)
+
 random <-
   rand_forest(
     engine = "ranger",
@@ -77,13 +94,9 @@ boosting <-
 
 # Workflow sets ----
 model_sets <- 
-  workflow_set(preproc = list(base_rec, ),
-               models = list(poisson, random, boosting)
-               )
-
-model_sets <- 
   bind_rows(workflow_set(list(base = base_rec), list(random)),
-          workflow_set(list(lm = lm_rec), list(poisson)),
+          workflow_set(list(lm = lm_rec), list(poisson_reg = pois, 
+                                               poisson_relreg = pois_rel)),
           workflow_set(list(xg = boost_rec), list(boosting)))
 
 ## Parallel processing ----
@@ -101,7 +114,7 @@ models_result <-
     grid = 30, # regular grid
     seed = 123, 
     verbose = TRUE,
-    metrics = metric_set(rmse, mae)
+    metrics = metric_set(rmse, mae, poisson_log_loss)
     )
 tictoc::toc()
 # What's the best model?
