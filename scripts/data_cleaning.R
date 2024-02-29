@@ -31,6 +31,12 @@ data$int_no[data$int_no == "9151"][1] <- "9150" #int_no is not used
 data$ln_distdt[is.na(data$ln_distdt)] <- 0
 
 # final dataset
-data <- select(data, -c(street_1, street_2))
+data <- select(data, -c(street_1, street_2)) # will not use street names in english
 
+# Export ----
 write_parquet(data, "./processed_data/data_final.parquet")
+
+
+
+
+

@@ -12,18 +12,50 @@ library(xgboost) # XGBoost
 library(doFuture) # parallel processing
 
 
-# Data split ----
+# Data loading ----
 landuse_df <- read_parquet("./processed_data/land_use.parquet")
 stops_df <- read_parquet("./processed_data/stm_stops.parquet") |> select(-stop_code_id)
 intersections_df <- 
+  # Main dataset
   read_parquet("./processed_data/data_final.parquet") |> 
+  # Joining with land_use for each intersections 
+  # NAs will be imputed in preprocessing below
   left_join(landuse_df, by = "int_no") |> 
-  left_join(stops_df, by = "int_no")
-set.seed(123)
-inter_split <- initial_split(intersections_df)
+  # Joining with STM stops
+  left_join(stops_df, by = "int_no") |>
+  # Lumping factors with too little observations
+  mutate(
+    borough = case_when(
+      borough %in% c("Île-Bizard-Sainte-Geneviève", "Dorval", "Kirkland", "Beaconsfield", "Pierrefonds-Roxboro", "Lachine", "Dollard-des-Ormeaux") ~ "West-Island",
+      borough %in% c("Montréal-Est", "Pointe-aux-Trembles-Rivières-des-Prairies", "Anjou") ~ "Montreal_greaterRDP",
+      borough %in% c("Lasalle", "Verdun") ~ "LaSalle_Verdun",
+      borough %in% c("Mont-Royal", "Saint-Laurent") ~ "Saint-Laurent_TMR",
+      borough %in% c("Côte-des-Neiges-Notre-Dame-de-Graces", "Côte-Saint-Luc", "Hampstead", "Outremont") ~ "CDN-NDG_greater",
+      borough %in% c("Sud-Ouest", "Westmount") ~ "Sud-Ouest_Westmount",
+      .default = as.character(borough)
+    ),
+    land_use = case_when(
+      land_use %in% c("grand_espace_vert_ou_récréation", "conservation") ~ "dominante_résidentielle",
+      land_use %in% c("grande_emprise_ou_grande_infrastructure_publique") ~ "industrie",
+      .default = as.character(land_use)
+    ),
+    across(c(land_use, borough), ~as.factor(.))
+  ) |> 
+  # dropping variables 
+  # "all_red_an": too little obs in minority class
+  # "half_phase": replace with corrected "new_half_r"
+  # rue_1 & rue_2: not used in model
+  select(-c(all_red_an, half_phase, rue_1, rue_2))
+
+
+
+# Data split ----
+set.seed(123) # Reproducibility
+inter_split <- initial_split(intersections_df, prop = 3/4)
 inter_train <- training(inter_split)
 inter_test <- testing(inter_split)
-inter_folds <- vfold_cv(inter_train, v = 10, repeats = 5) # 10-folds, 5-repeats
+# CV: 10-folds, 5-repeats
+inter_folds <- vfold_cv(inter_train, v = 10, repeats = 5) 
 
 # Data preprocessing (recipes) ----
 # need more preprocessing recipes for different models 
@@ -54,20 +86,19 @@ boost_rec <-
 # Model specifications ----
 pois <-
   poisson_reg(
-    engine = "glmnet",
     mode = "regression",
     penalty = tune(),
     mixture = tune()
-  )
+  ) |> 
+  set_engine(engine = "glmnet")
 
-pois_rel <-
+pois_nb <-
   poisson_reg(
     mode = "regression",
     penalty = tune(),
     mixture = tune()
   ) |> 
-  set_engine(engine = "glmnet",
-             relax = TRUE)
+  set_engine(engine = "glmnet")
 
 random <-
   rand_forest(
