@@ -47,6 +47,14 @@ intersections_df <-
   # rue_1 & rue_2: not used in model
   select(-c(all_red_an, half_phase, rue_1, rue_2))
 
+# data type
+dict <- readxl::read_xlsx("./references/Dictionnaire_final.xlsx")
+variables <- 
+  map(unique(dict$TYPE), \(x) 
+      dict |> 
+        filter(TYPE == x) |>
+        pull(NOM)) |> 
+  set_names(unique(dict$TYPE))
 
 
 # Data split ----
@@ -155,8 +163,57 @@ rank_results(models_result, rank_metric = "rmse", select_best = TRUE)
 # Looks like xgboost provides best model, followed closely by random forest
 
 # Tuning Grid ----
+base <- recipe(acc ~., data = inter_train) |> 
+  # Converting into date features
+  step_date(date, features = c("dow", "month")) |>
+  # Imputing missing observations with nearest observations
+  step_impute_knn(c(starts_with("date_"), land_use), neighbors = 2, impute_with = imp_vars(x, y)) |> 
+  step_rm(date) |> 
+  # Create roles to keep certain information for post prediction analysis
+  update_role(c(int_no, x, y), new_role = "ID") |>
+  step_center(all_numeric_predictors()) |> 
+  step_scale(all_numeric_predictors()) |> 
+  # May differ for boosting
+  step_dummy(all_factor_predictors(), one_hot = TRUE) |> 
+  step_nzv(all_predictors()) |> 
+  step_unknown(all_nominal_predictors(), new_level = "NA") |> 
+  update_role(matches(variables$geometry_data), new_role = "geometry_data") |> 
+  update_role(matches(variables$traffic_data), new_role = "traffic_data") |> 
+  update_role(matches(variables$safety_measures), new_role = "safety_measures")
+base_trans <- 
+  base |> 
+  step_poly(has_role("traffic_data"), degree = 2)
 
+boost_wk <- workflow(preprocessor = base_trans, spec = boosting)
+grid <- 
+  extract_parameter_set_dials(boost_wk) |> 
+  update("mtry" = mtry(range(1, 20))) |> 
+  grid_max_entropy(size = 50)
 
+tictoc::tic()
+all_cores <- parallel::detectCores(logical = FALSE)
+registerDoFuture()
+cl <- parallel::makeCluster(all_cores)
+plan(cluster, workers = cl)
 
+best_boost <- tune_grid(
+  boost_wk,
+  inter_folds,
+  grid = grid,
+  metrics = metric_set(rmse, mae, poisson_log_loss),
+  control = control_grid(save_pred = TRUE,
+                         save_workflow = TRUE)
+)
+tictoc::toc()
 
+final_boost <- 
+  finalize_workflow(boost_wk, select_by_one_std_err(best_boost, metric = "mae", trees)) |> 
+  last_fit(inter_split)
+pred_boost <- 
+  final_boost |> 
+  extract_workflow() |> 
+  predict(intersections_df) |> 
+  bind_cols(acc = intersections_df$acc, int_no = intersections_df$int_no)
+
+# saveRDS(best_boost, "./output/boosting_transform")
 
