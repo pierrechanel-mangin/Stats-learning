@@ -30,7 +30,9 @@ aug_land_use <-
   summarise(value = sum(value), .groups = "drop") |> 
   filter(value >= 1) |> 
   pivot_wider(names_from = name, values_from = value, values_fill = 0) |> 
-  right_join(select(as_tibble(intersections_sf), int_no), by = "int_no") |> 
+  right_join(select(as_tibble(intersections_sf), int_no), 
+             by = "int_no", 
+             relationship = "one-to-one") |> 
   mutate(across(everything(), ~replace_na(., 0))) |> 
   pivot_longer(!int_no) |> 
   filter(value == 1) |>  
@@ -38,8 +40,19 @@ aug_land_use <-
   # However, 4 intersections missing
   select(int_no, land_use = name)
 
+multiple_lu <- 
+  aug_land_use |> 
+  add_count(int_no) |> 
+  filter(n == 2) |> 
+  pull(int_no)
+
+# manual data cleaning
+aug_land_use$land_use[aug_land_use$int_no %in% c("1017", "1108", "132", "1553")] <- "activités_diversifiées"
+aug_land_use$land_use[aug_land_use$int_no %in% c("1404", "235", "236")] <- "centre_ville_d_agglomération"
+
 # Combine grand_espace_vert_ou_récréation and conservation with dominante_résidentielle
 # grande_emprise_ou_grande_infrastructure_publique with industrie 
 # NA with something
-
-write_parquet(aug_land_use, "./processed_data/land_use.parquet")
+aug_land_use |> 
+  distinct(int_no, land_use) |> 
+  write_parquet("./processed_data/land_use.parquet")
