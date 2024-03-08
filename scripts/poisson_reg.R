@@ -10,7 +10,6 @@ library(poissonreg) # tidymodels wrapper for poisson glmnet
 library(ranger) # Random forest
 library(xgboost) # XGBoost
 library(doFuture) # parallel processing
-
 library(embed) # recipe step for sparse pca
 
 # all pred
@@ -34,43 +33,6 @@ base <- recipe(acc ~., data = inter_train) |>
   update_role(matches(variables$geometry_data), new_role = "geometry_data") |> 
   update_role(matches(variables$traffic_data), new_role = "traffic_data") |> 
   update_role(matches(variables$safety_measures), new_role = "safety_measures")
-
-pca_traff <- 
-  base |> 
-  step_pca_sparse(
-    has_role("traffic_data"),
-    predictor_prop = 0.8,
-    num_comp = 3,
-    prefix = "traffic_PC",
-    id = "sparse pca traff"
-  )
-
-pca_geom <- 
-  base |> 
-  step_pca_sparse(
-    has_role("geometry_data"),
-    predictor_prop = 0.8,
-    num_comp = 3,
-    prefix = "geom_PC",
-    id = "sparse pca geom"
-  )
-
-pca_both <- 
-  base |> 
-  step_pca_sparse(
-    has_role("geometry_data"),
-    predictor_prop = 0.8,
-    num_comp = 3,
-    prefix = "geom_PC",
-    id = "sparse pca geometry"
-  ) |> 
-  step_pca_sparse(
-    has_role("traffic_data"),
-    predictor_prop = 0.8,
-    num_comp = 3,
-    prefix = "traffic_PC",
-    id = "sparse pca traffic"
-  )
 
 base_int <- 
   base |> 

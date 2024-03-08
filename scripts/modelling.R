@@ -39,13 +39,14 @@ intersections_df <-
       land_use %in% c("grande_emprise_ou_grande_infrastructure_publique") ~ "industrie",
       .default = as.character(land_use)
     ),
-    across(c(land_use, borough), ~as.factor(.))
+    across(c(land_use, borough), ~as.factor(.)),
+    acc_bin = if_else(acc == 0, factor(0), factor(1))
   ) |> 
   # dropping variables 
   # "all_red_an": too little obs in minority class
   # "half_phase": replace with corrected "new_half_r"
   # rue_1 & rue_2: not used in model
-  select(-c(all_red_an, half_phase, rue_1, rue_2))
+  select(-c(all_red_an, half_phase, rue_1, rue_2, date))
 
 # data type
 dict <- readxl::read_xlsx("./references/Dictionnaire_final.xlsx")
