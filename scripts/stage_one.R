@@ -1,4 +1,4 @@
-
+# Functions ----
 predcvglmnet=function(xtrain,ytrain,k=10,alpha=1)
 {
   # xtrain=matrix of predictors
@@ -60,6 +60,8 @@ bestcutp=function(predcv,y,gainmat=diag(2),cutp=seq(0,1,.02),plotit=FALSE)
   out
 }
 
+# Data Splits ---- 
+source("./scripts/modelling_setup.R")
 set.seed(234) # Reproducibility
 stage1_split <- initial_split(intersections_df, prop = 3/4, strata = acc_bin)
 stage1_train <- training(stage1_split)
@@ -138,7 +140,7 @@ full_phat <-
          acc_bin = intersections_df$acc_bin) |> 
   select(int_no, acc_bin, pred_prob = lambda.1se, pred_class)
 
-write_parquet(full_phat, "./output/stage1_pred.parquet")
+# write_parquet(full_phat, "./output/stage1_pred.parquet")
 
 # Extra ----
 coef_stage1 <- 

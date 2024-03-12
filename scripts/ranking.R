@@ -1,7 +1,7 @@
 source("./scripts/modelling_setup.R")
-library(sf)
-library(leaflet)
 
+stage1_pred <- read_parquet("./output/stage1_pred.parquet")
+stage2_pred <- read_parquet("./output/stage2_pred.parquet")
 final_pred_tb <- 
   intersections_df |> 
   select(int_no, acc, acc_bin, x, y) |> 
@@ -15,7 +15,8 @@ final_pred_tb |>
   mutate(rank = row_number()) |> 
   write_csv("./output/rank_results.csv")
 
-
+library(sf)
+library(leaflet)
 # Maps ----
 inter_sf <- 
   sf::st_as_sf(
@@ -65,7 +66,8 @@ leaflet(data = pred_rank) |>
 
 
 
-
+library(gt)
+data <- read_parquet("./processed_data/data_final.parquet")
 data |> 
   select(int_no, acc, x, y, rue_1, rue_2) |> 
   left_join(stage2_pred, by = "int_no") |> 

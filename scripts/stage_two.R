@@ -96,30 +96,31 @@ stage2_sets <-
             workflow_set(list(boost = boost_rec), list(xgb = boost)))
 
 ## Parallel processing
-tictoc::tic()
-all_cores <- parallel::detectCores(logical = FALSE)
-registerDoFuture()
-cl <- parallel::makeCluster(all_cores)
-plan(cluster, workers = cl)
+# tictoc::tic()
+# all_cores <- parallel::detectCores(logical = FALSE)
+# registerDoFuture()
+# cl <- parallel::makeCluster(all_cores)
+# plan(cluster, workers = cl)
 
-# Workflow map
-stage2_result <- 
-  workflow_map(
-    stage2_sets, 
-    resamples = stage2_folds, 
-    fn = "tune_grid",
-    grid = 30, # regular grid
-    seed = 123, 
-    verbose = TRUE,
-    metrics = metric_set(rmse, mae, poisson_log_loss)
-  )
-
-plan(sequential) # Explicitly close multisession workers
-
-tictoc::toc()
+# Workflow map ----
+# stage2_result <- 
+#   workflow_map(
+#     stage2_sets, 
+#     resamples = stage2_folds, 
+#     fn = "tune_grid",
+#     grid = 30, # regular grid
+#     seed = 123, 
+#     verbose = TRUE,
+#     metrics = metric_set(rmse, mae, poisson_log_loss)
+#   )
+# 
+# plan(sequential) # Explicitly close multisession workers
+# 
+# tictoc::toc()
 #saveRDS(stage2_result, "./output/stage2_result")
 
-#stage2_result <- readRDS("./output/stage2_result")
+# Results ----
+stage2_result <- readRDS("./output/stage2_result")
 autoplot(stage2_result, select_best = TRUE, rank_metric = "rmse", metric = c("rmse", "mae"))
 
 
@@ -143,7 +144,10 @@ stage2_pred <-
   mutate(int_no = stage2_df$int_no) |> 
   select(int_no, .pred)
 
-# Extra ------------
+# write_parquet(stage2_pred, "./output/stage2_pred.parquet")
+
+
+# Extra  (ignore) ------------
 stage2_rf <- 
   extract_workflow(stage2_sets, id = "base_rf_ranger") |> 
   update_model(rf) |> # forgot to initially add the importance argument
