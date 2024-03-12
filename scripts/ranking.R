@@ -66,5 +66,32 @@ leaflet(data = pred_rank) |>
 
 
 
+data |> 
+  select(int_no, acc, x, y, rue_1, rue_2) |> 
+  left_join(stage2_pred, by = "int_no") |> 
+  left_join(select(stage1_pred, -acc_bin), by = "int_no") |> 
+  mutate(.pred = replace_na(.pred, 0)) |> 
+  arrange(desc(.pred), desc(pred_prob)) |> 
+  mutate(rank = row_number()) |> 
+  filter(rank<=10) |> 
+  select(rank, predicted_accident = .pred, rue_1, rue_2) |> 
+  mutate(intersection = str_glue("{rue_1}/{rue_2}")) |> 
+  select(-c(rue_1, rue_2)) |> 
+  gt(rowname_col = "rank") |>
+  cols_label(
+    predicted_accident = "**Predicted**<br>Number of accidents",
+    intersection = "**Intersection**",
+    .fn = md
+  ) |> 
+  cols_align(
+    align = "center",
+    columns = everything()
+  ) |>
+  tab_header(
+    title = md("Top 10 **riskiest** intersections"),
+    subtitle = md("Ranking of intersections and the predicted number of accidents")
+  ) |> 
+  tab_options(table.background.color = "#F5F5F5")
+
 
 
