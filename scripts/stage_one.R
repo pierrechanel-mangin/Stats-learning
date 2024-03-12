@@ -1,14 +1,71 @@
-# Data split ----
+
+predcvglmnet=function(xtrain,ytrain,k=10,alpha=1)
+{
+  # xtrain=matrix of predictors
+  # ytrain=vector of target (0-1)
+  # k= # folds in CV
+  # alpha=alpha parameter in glmnet
+  
+  # value: the CV predicted probabilities
+  
+  library(glmnet)
+  set.seed(375869)
+  n=nrow(xtrain)
+  pred=rep(0,n)
+  per=sample(n,replace=FALSE)
+  tl=1
+  for(i in 1:k)
+  {
+    tu=min(floor(tl+n/k-1),n)
+    if(i==k){tu=n}
+    cind=per[tl:tu]
+    fit = cv.glmnet(xtrain[-cind,], 
+                    ytrain[-cind], 
+                    family="binomial", alpha=alpha
+    )
+    
+    pred[cind]=predict(fit,new=xtrain[cind,],s="lambda.1se", type="response")
+    tl=tu+1
+  }
+  pred
+}
+bestcutp=function(predcv,y,gainmat=diag(2),cutp=seq(0,1,.02),plotit=FALSE)
+{
+  # predcv = vector of predicted probabilities (obtained out-of-sample by CV for example)
+  # y = vector of target (0-1)
+  # gainmat = gain matrix (2X2)  (we want to maximize the gain)
+  #	(1,1) = gain if pred=0 and true=0
+  #	(1,2) = gain if pred=0 and true=1
+  #	(2,1) = gain if pred=1 and true=0
+  #	(2,2) = gain if pred=1 and true=1
+  # cutp=vector of thresholds to try
+  # plotit=plot or not the results
+  
+  # value: a list with 
+  #		1) matrix giving the thresholds and estimated mean gains 	
+  #		2) the threshold with maximum gain, with the associated mean gain
+  
+  nc=length(cutp)
+  gain=rep(0,nc)
+  for(i in 1:nc)
+  {
+    pred=as.numeric(predcv>cutp[i])
+    gain[i]=mean(gainmat[1,1]*(pred==0)*(y==0)+gainmat[1,2]*(pred==0)*(y==1)+
+                   gainmat[2,1]*(pred==1)*(y==0)+gainmat[2,2]*(pred==1)*(y==1))
+  }
+  if(plotit){plot(cutp,gain,type="l",xlab="threshold",ylab="gain")}
+  out=list(NULL,NULL)
+  out[[1]]=cbind(cutp,gain)
+  out[[2]]=out[[1]][which.max(gain),]
+  out
+}
+
 set.seed(234) # Reproducibility
 stage1_split <- initial_split(intersections_df, prop = 3/4, strata = acc_bin)
 stage1_train <- training(stage1_split)
 stage1_test <- testing(stage1_split)
-# CV: 10-folds, 5-repeats
-stage1_folds <- vfold_cv(stage1_train, v = 10, repeats = 5, strata = acc_bin) 
 
-# Data preprocessing (recipes) ----
-## Foundational recipe to be used for others
-base <- 
+lm_rec <- 
   recipe(acc_bin ~., data = stage1_train) |> 
   step_rm(acc) |> 
   # Imputing missing observations with nearest observations
@@ -18,120 +75,84 @@ base <-
   add_role(contains(variables$geometry_data), new_role = "geometry_data") |> 
   add_role(contains(variables$traffic_data), new_role = "traffic_data") |>
   step_center(all_numeric_predictors()) |> 
-  step_scale(all_numeric_predictors()) 
-
-## Logistic regression recipes
-lm_rec <- 
-  base |> 
+  step_scale(all_numeric_predictors()) |> 
   # May differ for boosting
   step_dummy(all_factor_predictors(), one_hot = FALSE) |> 
   step_nzv(all_predictors()) |> 
-  step_unknown(all_nominal_predictors(), new_level = "NA") 
-# Adding both Interactions and Transformations (it)
-lm_it_rec <- 
+  step_unknown(all_nominal_predictors(), new_level = "NA") |> 
+  step_poly(has_role("traffic_data"), degree = 2)
+
+stage1_prep <- 
   lm_rec |> 
-  step_interact(terms = ~ matches("_X"):has_role("traffic_data")) |> 
-  step_poly(has_role("traffic_data"), degree = 2)
+  prep() |> 
+  bake(new_data = NULL)
 
-## boost recipe
-boost_rec <- 
-  base |> 
-  step_dummy(all_factor_predictors(), one_hot = TRUE) |> 
-  step_nzv(all_predictors()) |> 
-  step_unknown(all_nominal_predictors(), new_level = "NA") |> 
-  step_poly(has_role("traffic_data"), degree = 2)
-
-## Random Forest recipe
-randf_rec <- 
-  base |> 
-  step_nzv(all_predictors()) |> 
-  step_unknown(all_nominal_predictors(), new_level = "NA") |> 
-  step_poly(has_role("traffic_data"), degree = 2)
-
-# Model Specification ----
-
-## Logistic Regression spec
-log_reg <-
-  logistic_reg(penalty = tune(), mixture = tune()) %>% 
-  set_engine("glmnet")
-
-## Random Forest spec
-rf <-
-  rand_forest(
-    mtry = tune(),
-    trees = tune(),
-    min_n = 5L
-  ) %>% 
-  set_engine("ranger",  
-             importance = "impurity") %>% 
-  set_mode("classification")
-
-## XGBoost spec
-boost <-
-  boost_tree(
-    mtry = tune(), trees = tune(), 
-    tree_depth = tune(), learn_rate = tune(),
-    min_n = 5L, loss_reduction = 0.0, sample_size = 1.0, stop_iter = 20L
-  ) %>% 
-  set_engine("xgboost") %>% 
-  set_mode("classification")
-
-# Workflow set
-stage1_sets <- 
-  bind_rows(workflow_set(list(baselm = lm_rec, advlm = lm_it_rec), list(glmnet = log_reg)),
-            workflow_set(list(base_rf = randf_rec), list(ranger = rf)),
-            workflow_set(list(boost = boost_rec), list(xgb = boost)))
-
-## Parallel processing
+library(glmnet)
 tictoc::tic()
-all_cores <- parallel::detectCores(logical = FALSE)
-registerDoFuture()
-cl <- parallel::makeCluster(all_cores)
-plan(cluster, workers = cl)
-
-# Workflow map
-stage1_result <- 
-  workflow_map(
-    stage1_sets, 
-    resamples = stage1_folds, 
-    fn = "tune_grid",
-    grid = 30, # regular grid
-    seed = 123, 
-    verbose = TRUE,
-    metrics = metric_set(accuracy, roc_auc, recall, precision, f_meas)
-  )
-
-plan(sequential) # Explicitly close multisession workers
+set.seed(234)
+stage1_LASSO <- 
+  cv.glmnet(as.matrix(select(stage1_prep, -c(acc_bin, int_no:y))), 
+            stage1_prep$acc_bin,
+          family = "binomial", 
+          nfolds = 10,
+          alpha = 1)
 
 tictoc::toc()
 
-# Export model results
-#saveRDS(stage1_result, "./output/stage1_result")
 
-# Finalize best model ----
-stage1_result <- readRDS("./output/stage1_result")
+tictoc::tic()
+set.seed(234)
+stage1_dCVLASSO <- predcvglmnet(as.matrix(select(stage1_prep, -c(acc_bin, int_no:y))), 
+                                stage1_prep$acc_bin, 
+                                k=10, 
+                                alpha=1
+                                )
+tictoc::toc()
 
-best_highprec <- 
-  extract_workflow_set_result(stage1_result, id = "boost_xgb") |> 
-  # One std error approach. tree_depth as complexity measure
-  select_by_one_std_err(metric = "roc_auc", tree_depth)
 
-stage1_finalft <- 
-  extract_workflow(stage1_sets, id = "boost_xgb") |> 
-  finalize_workflow(best_highprec) |> 
-  last_fit(stage1_split, 
-           metrics = metric_set(accuracy, roc_auc, sensitivity, specificity, recall, precision), 
-           add_validation_set = TRUE)
 
-# Stage 1 predictions ----
-stage1_pred <-  
-  stage1_finalft |> 
-  extract_workflow() |> 
-  predict(new_data = intersections_df, type = "prob") |> 
-  mutate(
-    int_no = intersections_df$int_no,
-    .pred_class = if_else(.pred_0 >= 0.5, factor("0"), factor("1"))
-  ) |> 
-  select(int_no, .pred_0, .pred_1, .pred_class)
 
-write_parquet(stage1_pred, "./output/stage1_pred.parquet")
+
+bestcutp(stage1_dCVLASSO, stage1_prep$acc_bin, 
+         gainmat = matrix(c(1, -5, 0, 10), nrow = 2), cutp = seq(0,1,.02), plotit = TRUE)
+
+
+
+test_phat <- 
+  predict(stage1_LASSO, 
+        newx = as.matrix(bake(prep(lm_rec), new_data = stage1_test) |> 
+                                         select(-c(acc_bin, int_no:y))), 
+        s = "lambda.1se", type="response")|> 
+  as_tibble() |> 
+  mutate(pred_class = if_else(lambda.1se<=0.48, factor("0"), factor("1")),
+         truth = stage1_test$acc_bin)
+
+full_phat <- 
+  predict(stage1_LASSO, 
+          newx = as.matrix(bake(prep(lm_rec), new_data = intersections_df) |> 
+                             select(-c(acc_bin, int_no:y))), 
+          s = "lambda.1se", type="response")|> 
+  as_tibble() |> 
+  mutate(int_no = intersections_df$int_no,
+         pred_class = if_else(lambda.1se<=0.48, factor("0"), factor("1")),
+         acc_bin = intersections_df$acc_bin) |> 
+  select(int_no, acc_bin, pred_prob = lambda.1se, pred_class)
+
+write_parquet(full_phat, "./output/stage1_pred.parquet")
+
+# Extra ----
+coef_stage1 <- 
+  coef(stage1_LASSO, s = "lambda.1se") |> 
+  as.matrix() |> 
+  as_tibble(rownames = "term") |>
+  filter(term != "(Intercept)") |>
+  mutate(selected = if_else(s1 == 0, "No", "Yes")) |>
+  select(term, selected)
+p1 <- stage1_LASSO  |> 
+  vip::vi() |> 
+  filter(Importance != 0) |> 
+  ggplot(aes(Variable, Importance, color = Sign)) +
+  geom_point()+
+  coord_flip() + 
+  theme_minimal() +
+  ggtitle("Variables selected in Stage 1 (coefficient size and sign)")

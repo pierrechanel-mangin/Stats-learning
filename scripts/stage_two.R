@@ -5,10 +5,10 @@ source("./scripts/modelling_setup.R")
 stage1_pred <- read_parquet("./output/stage1_pred.parquet")
 stage2_df <- 
   intersections_df |> 
-  left_join(stage1_pred, by = "int_no", 
+  left_join(select(stage1_pred, int_no, pred_class), by = "int_no", 
             relationship = "one-to-one")|> 
-  filter(.pred_class=="1") |> 
-  select(-c(.pred_0, .pred_1, .pred_class))
+  filter(pred_class=="1") |> 
+  select(-pred_class)
 
 # Data split ----
 set.seed(123) # Reproducibility
@@ -36,7 +36,12 @@ lm_rec <-
   # May differ for boosting
   step_dummy(all_factor_predictors(), one_hot = FALSE) |> 
   step_nzv(all_predictors()) |> 
-  step_unknown(all_nominal_predictors(), new_level = "NA") 
+  step_unknown(all_nominal_predictors(), new_level = "NA")
+# transform only
+lm_trans_rec <- 
+  lm_rec |> 
+  step_poly(has_role("traffic_data"), degree = 2)
+
 # Adding both Interactions and Transformations (it)
 lm_it_rec <- 
   lm_rec |> 
@@ -86,7 +91,7 @@ boost <-
 
 # Workflow set
 stage2_sets <- 
-  bind_rows(workflow_set(list(baselm = lm_rec, advlm = lm_it_rec), list(glmnet = pois_reg)),
+  bind_rows(workflow_set(list(baselm = lm_rec, translm = lm_trans_rec, advlm = lm_it_rec), list(glmnet = pois_reg)),
             workflow_set(list(base_rf = randf_rec), list(ranger = rf)),
             workflow_set(list(boost = boost_rec), list(xgb = boost)))
 
@@ -114,16 +119,17 @@ plan(sequential) # Explicitly close multisession workers
 tictoc::toc()
 #saveRDS(stage2_result, "./output/stage2_result")
 
-stage2_result <- readRDS("./output/stage2_result")
+#stage2_result <- readRDS("./output/stage2_result")
+autoplot(stage2_result, select_best = TRUE, rank_metric = "rmse", metric = c("rmse", "mae"))
+
 
 best_lowglmnet <- 
-  extract_workflow_set_result(stage2_result, id = "base_rf_ranger") |> 
+  extract_workflow_set_result(stage2_result, id = "translm_glmnet") |> 
   # One std error approach. tree_depth as complexity measure
-  select_by_one_std_err(metric = "rmse", trees)
+  select_by_one_std_err(metric = "rmse", desc(penalty))
 
 stage2_finalft <- 
-  extract_workflow(stage2_sets, id = "base_rf_ranger") |> update_model(rf) |> 
-  update_model(rf) |> # forgot to initially add the importance argument
+  extract_workflow(stage2_sets, id = "translm_glmnet") |> 
   finalize_workflow(best_lowglmnet) |> 
   last_fit(stage2_split, 
            metrics = metric_set(rmse, mae, poisson_log_loss), 
@@ -137,7 +143,7 @@ stage2_pred <-
   mutate(int_no = stage2_df$int_no) |> 
   select(int_no, .pred)
 
-# ------------
+# Extra ------------
 stage2_rf <- 
   extract_workflow(stage2_sets, id = "base_rf_ranger") |> 
   update_model(rf) |> # forgot to initially add the importance argument
@@ -155,6 +161,7 @@ stage2_boost <-
   last_fit(stage2_split, 
            metrics = metric_set(rmse, mae, poisson_log_loss), 
            add_validation_set = TRUE)
+
 stage2_glm <- 
   extract_workflow(stage2_sets, id = "baselm_glmnet") |>
   finalize_workflow(extract_workflow_set_result(stage2_result, id = "baselm_glmnet") |> 
@@ -165,21 +172,41 @@ stage2_glm <-
            add_validation_set = TRUE)
 
 
-all_model_pred <- 
-  map(list(stage2_glm, stage2_rf, stage2_boost), \(object)
+allmodels_pred_stage2 <- 
+  map(list(stage2_finalft, stage2_rf, stage2_boost), \(object)
       extract_workflow(object) |> 
         predict(new_data = stage2_df) |> 
         mutate(int_no = stage2_df$int_no,
                acc = stage2_df$acc) |> 
         select(int_no, acc, .pred)) |> 
   set_names(c("Poisson Regression", "Random Forest",  "XGBoost")) |> 
-  list_rbind(names_to = "model_type")
-all_model_pred |> 
-  mutate(testing_data = if_else(int_no %in% stage2_test$int_no, "Testing", "Training"))|> 
-  ggplot(aes(acc, .pred, color = testing_data))+
+  list_rbind(names_to = "model_type") |> 
+  mutate(testing_data = if_else(int_no %in% stage2_test$int_no, "Testing", "Training"))
+
+
+  ggplot(allmodels_pred_stage2, aes(acc, .pred, color = testing_data))+
   geom_point(alpha = 0.6, position = position_jitter(width = 0.2))+
   geom_abline(slope = 1, linetype = 2)+
   facet_wrap(~model_type)+
   theme_minimal() + 
   ggtitle("Predicted against actual number of accidents (two-stage)") +
   xlab("Truth") + ylab("Prediction") + labs(colour="Data split")
+
+  
+  
+  coef_stage2 <-
+    stage2_finalft |>
+    extract_workflow() |>
+    tidy() |>
+    filter(term != "(Intercept)") |>
+    mutate(selected = if_else(estimate == 0, "No", "Yes")) |>
+    select(term, selected)
+  p2 <- stage2_finalft |> 
+    extract_fit_parsnip() |> 
+    vi() |> 
+    filter(Importance != 0) |> 
+    ggplot(aes(Variable, Importance, color = Sign)) +
+    geom_point()+
+    coord_flip() + 
+    theme_minimal() +
+    ggtitle("Variables selected in Stage 2 (coefficient size and sign)")
