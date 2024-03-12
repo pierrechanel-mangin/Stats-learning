@@ -1,3 +1,4 @@
+# install.packages(c("tidyverse", "arrow", "sf"))
 library(arrow) # parquet file format
 library(sf) # SF for spatial analysis
 library(tidyverse) # data analysis

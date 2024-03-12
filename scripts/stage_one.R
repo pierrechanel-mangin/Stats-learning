@@ -143,6 +143,7 @@ full_phat <-
 # write_parquet(full_phat, "./output/stage1_pred.parquet")
 
 # Extra ----
+library(vip)
 coef_stage1 <- 
   coef(stage1_LASSO, s = "lambda.1se") |> 
   as.matrix() |> 

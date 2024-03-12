@@ -85,27 +85,27 @@ model_sets <-
             workflow_set(list(boost = boost_rec), list(xgb = boost)))
 
 ## Parallel processing
-tictoc::tic()
-all_cores <- parallel::detectCores(logical = FALSE)
-registerDoFuture()
-cl <- parallel::makeCluster(all_cores)
-plan(cluster, workers = cl)
+# tictoc::tic()
+# all_cores <- parallel::detectCores(logical = FALSE)
+# registerDoFuture()
+# cl <- parallel::makeCluster(all_cores)
+# plan(cluster, workers = cl)
 
-# Workflow map
-model_result <- 
-  workflow_map(
-    model_sets, 
-    resamples = inter_folds, 
-    fn = "tune_grid",
-    grid = 30, # regular grid
-    seed = 123, 
-    verbose = TRUE,
-    metrics = metric_set(rmse, mae, poisson_log_loss)
-  )
-
-plan(sequential) # Explicitly close multisession workers
-
-tictoc::toc()
+# Workflow map ----
+# model_result <- 
+#   workflow_map(
+#     model_sets, 
+#     resamples = inter_folds, 
+#     fn = "tune_grid",
+#     grid = 30, # regular grid
+#     seed = 123, 
+#     verbose = TRUE,
+#     metrics = metric_set(rmse, mae, poisson_log_loss)
+#   )
+# 
+# plan(sequential) # Explicitly close multisession workers
+# 
+# tictoc::toc()
 # saveRDS(model_result, "./output/onestage_result")
 
 

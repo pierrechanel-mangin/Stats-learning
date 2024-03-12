@@ -1,5 +1,5 @@
 # Package installation ----
-# install.packages(c("tidyverse", "arrow", "tidymodels", "poissonreg"))
+# install.packages(c("tidyverse", "arrow", "tidymodels", "glmnet", "poissonreg", "ranger", "xgboost", "doFuture"))
 
 # Loading packages ----
 library(tidyverse) # data manipulations

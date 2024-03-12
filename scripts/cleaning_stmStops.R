@@ -1,3 +1,4 @@
+# install.packages(c("tidyverse", "arrow", "sf", "geosphere"))
 library(arrow) # parquet file format
 library(sf) # SF for spatial analysis
 library(geosphere) # calculating geodistances

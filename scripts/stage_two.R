@@ -197,7 +197,7 @@ allmodels_pred_stage2 <-
   xlab("Truth") + ylab("Prediction") + labs(colour="Data split")
 
   
-  
+  library(vip)
   coef_stage2 <-
     stage2_finalft |>
     extract_workflow() |>

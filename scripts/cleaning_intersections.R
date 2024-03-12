@@ -1,3 +1,4 @@
+# install.packages(c("tidyverse", "arrow"))
 library(tidyverse)
 library(arrow)
 
